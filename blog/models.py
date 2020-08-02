@@ -7,39 +7,66 @@ from django.db.models import Count
 class TagQuerySet(models.QuerySet):
 
     def popular(self):
-        popular_tags = self.annotate(num_posts=Count('posts', distinct=True)).order_by('-num_posts')
+        popular_tags = self.annotate(num_posts=Count('posts')).order_by('-num_posts')
         return popular_tags
+
+    def fetch_with_posts_count(self):
+        tags_ids = [tag.id for tag in self]
+        tags_with_posts_count = Tag.objects.filter(id__in=tags_ids).annotate(posts_count=Count('posts'))
+        ids_and_posts_count = tags_with_posts_count.values_list('id', 'posts_count')
+        count_for_id = dict(ids_and_posts_count)
+        for tag in self:
+            tag.posts_count = count_for_id[tag.id]
+
+        return self
 
 
 class PostQuerySet(models.QuerySet):
 
     def popular(self):
-        popular_posts = self.annotate(num_likes=Count('likes')).order_by('-num_likes')
+        popular_posts = self.annotate(likes_count=Count('likes')).order_by('-likes_count')
         return popular_posts
 
     def fetch_with_comments_count(self):
-        self_ids = [post.id for post in self]
-        posts_with_comments = Post.objects.filter(id__in=self_ids).annotate(
-            comments_count=Count('comments'))
-        ids_and_comments = posts_with_comments.values_list('id', 'comments_count')
-        count_for_id = dict(ids_and_comments)
+        posts_ids = [post.id for post in self]
+        posts_with_comments_count = Post.objects.filter(id__in=posts_ids).annotate(comments_count=Count('comments'))
+        ids_and_comments_count = posts_with_comments_count.values_list('id', 'comments_count')
+        count_for_id = dict(ids_and_comments_count)
         for post in self:
             post.num_comments = count_for_id[post.id]
 
         return self
 
+    def fetch_with_tags_posts_count(self):
+        tags_ids = []
+        for post in self:
+            tags_ids += [tag.id for tag in post.tags.all()]
+        tags_with_posts_count = Tag.objects.filter(id__in=tags_ids).annotate(posts_count=Count('posts'))
+        ids_and_posts_count = tags_with_posts_count.values_list('id', 'posts_count')
+        count_for_id = dict(ids_and_posts_count)
+        for post in self:
+            for tag in post.tags.all():
+                tag.posts_count = count_for_id[tag.id]
+
+        return self
+
 
 class Post(models.Model):
-    title = models.CharField("Заголовок", max_length=200)
-    text = models.TextField("Текст")
-    slug = models.SlugField("Название в виде url", max_length=200)
-    image = models.ImageField("Картинка")
-    published_at = models.DateTimeField("Дата и время публикации")
+    title = models.CharField(verbose_name="Заголовок", max_length=200)
+    text = models.TextField(verbose_name="Текст")
+    slug = models.SlugField(verbose_name="Название в виде url", max_length=200)
+    image = models.ImageField(verbose_name="Картинка")
+    published_at = models.DateTimeField(verbose_name="Дата и время публикации")
 
-    author = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Автор",
-                               limit_choices_to={'is_staff': True})
-    likes = models.ManyToManyField(User, related_name="liked_posts", verbose_name="Кто лайкнул", blank=True)
-    tags = models.ManyToManyField("Tag", related_name="posts", verbose_name="Теги")
+    author = models.ForeignKey(
+        verbose_name="Автор",
+        to=User,
+        on_delete=models.CASCADE,
+        related_name='posts',
+        limit_choices_to={'is_staff': True}
+    )
+    likes = models.ManyToManyField(verbose_name="Кто лайкнул", to=User, related_name="liked_posts", blank=True)
+    tags = models.ManyToManyField(verbose_name="Теги", to="Tag", related_name="posts")
 
     objects = PostQuerySet.as_manager()
 
@@ -56,7 +83,7 @@ class Post(models.Model):
 
 
 class Tag(models.Model):
-    title = models.CharField("Тег", max_length=20, unique=True)
+    title = models.CharField(verbose_name="Тег", max_length=20, unique=True)
 
     objects = TagQuerySet.as_manager()
 
@@ -77,15 +104,15 @@ class Tag(models.Model):
 
 class Comment(models.Model):
     post = models.ForeignKey(
-        "Post",
-        on_delete=models.CASCADE,
         verbose_name="Пост, к которому написан",
+        to=Post,
+        on_delete=models.CASCADE,
         related_name='comments'
     )
-    author = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name="Автор", related_name='comments')
+    author = models.ForeignKey(verbose_name="Автор", to=User, on_delete=models.CASCADE, related_name='comments')
 
-    text = models.TextField("Текст комментария")
-    published_at = models.DateTimeField("Дата и время публикации")
+    text = models.TextField(verbose_name="Текст комментария")
+    published_at = models.DateTimeField(verbose_name="Дата и время публикации")
 
     def __str__(self):
         return f"{self.author.username} under {self.post.title}"
